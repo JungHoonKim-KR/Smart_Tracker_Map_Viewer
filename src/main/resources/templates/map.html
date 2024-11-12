@@ -1,308 +1,351 @@
 <!DOCTYPE html>
 <html xmlns:th>
 <head>
-<!--    google api 사용은 하루에 2,500건, 초당 10건의 요청에 한해서만 무료입니다. 그 이상 사용하려면 유료로 전환해야 합니다.)-->
     <title>Google Maps Example</title>
-    <script src="https://maps.googleapis.com/maps/api/js?key=${apikey}" async
+    <script src="https://maps.googleapis.com/maps/api/js?key=${api.key}" async
             defer></script>
+    <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
+    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+    <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
+
     <script>
-        // 공용변수 선언
-        let map
-        let originData;
-        let deviceId;
-        let timeType;
-        let uniqueTimeList;
-        let selectedDataListOnDate;
-        let markedList;
+        // 공용 변수 선언
+        let map, polyLine, originData, deviceId,selectedDate, uniqueDataList;
+        let markedList = [], positionList = [], timeTableBody, tableFragment;
+        const timeType="koreanDate";
 
-        // 로딩 표시 제어 함수
-        function showLoading() {
-            document.getElementById("loadingOverlay").style.display = "flex";
+
+        // 로딩 표시 함수
+        function toggleLoading(show) {
+            document.getElementById("loadingOverlay").style.display = show ? "flex" : "none";
+            $("#datePicker").datepicker({
+                dateFormat: "yy-mm-dd"
+            });
         }
 
-        function hideLoading() {
-            document.getElementById("loadingOverlay").style.display = "none";
-        }
-
-        //  end 공용변수 선언
-
-
-        // 함수: 데이터 불러오기
+        // 데이터 불러오기
         async function fetchLocations() {
             try {
                 const response = await fetch('/test');
-                originData = await response.json();
+                originData = Object.freeze(await response.json());
             } catch (error) {
                 console.error('Error fetching locations:', error);
             }
         }
-        // end 함수: 데이터 불러오기
 
-        // 함수: 지도 초기화
-        async function initMap() {
-            await fetchLocations();  // 데이터가 로드될 때까지 기다림
-            const uniqueDeviceIds = Array.from(new Set(originData.map(item => item.deviceId))).sort();
+        // 지도 초기화
+        async function initializing() {
+            await fetchLocations();
             const defaultLocation = {lat: 37.5665, lng: 126.9780};
-            // deviceId 셀렉트 옵션 생성
+            map = new google.maps.Map(document.getElementById("map"), {
+                zoom: 12, center: defaultLocation, mapId: "66476d03a2b9976a", gestureHandling: "greedy"
+            });
+            initializeTable()
+            populateDeviceOptions();
+            toggleLoading(false);
+        }
+
+        // 디바이스 옵션 채우기
+        function populateDeviceOptions() {
             const deviceSelect = document.getElementById("deviceSelect");
+            deviceSelect.innerHTML = ""; // 기존 옵션 초기화
+
+            const uniqueDeviceIds = Array.from(new Set(originData.map(item => item.deviceId))).sort();
+
+            const placeholderOption  = document.createElement("option");
+            placeholderOption.value = "";
+            placeholderOption.textContent = "디바이스 선택";
+            placeholderOption.disabled = false;
+            placeholderOption.selected = true;
+            deviceSelect.appendChild(placeholderOption);
+
             uniqueDeviceIds.forEach(id => {
                 const option = document.createElement("option");
                 option.value = id;
                 option.textContent = id;
                 deviceSelect.appendChild(option);
             });
-
-            map = new google.maps.Map(document.getElementById("map"), {
-                zoom: 12,
-                center: defaultLocation,
-                mapId: "66476d03a2b9976a",
-                gestureHandling: "greedy",
+            // Select2를 다시 초기화
+            $('#deviceSelect').select2({
+                placeholder: "디바이스 선택",
+                allowClear: true
             });
-            hideLoading();
+
         }
-        // end 함수: 지도 초기화
 
-
-        // 함수: 장치 선택
-        function deviceSelecting(){
+        // 장치 선택
+        function deviceSelecting() {
             deviceId = document.getElementById("deviceSelect").value;
-        }
-
-        // 함수: date setting
-        function dateSetting() {
-            timeType = document.getElementById("timeTypeSelect").value;
-            const dateSelect = document.getElementById("dateSelect");
-
-            if (!deviceId || !timeType) {
-                return;
-            }
-
-            // 선택한 장치와 시간 타입의 시간 필터링
-            uniqueTimeList = Array.from(new Set(
-                originData.filter(item => item.deviceId === deviceId)
-                    .map(item => {
-                        let date;
-                        // 2000-01은 에러 기록이므로 createDate로 대체
-                        if (item[timeType].startsWith("2000-01")) {
-                            date = new Date(item["createDate"]);
-                            if (timeType === "collectDate") {
-                                date.setHours(date.getHours() - 9);
-                            }
-                        } else {
-                            date = new Date(item[timeType]);
-                        }
-                        // Hours() 함수 사용 시 UTC로 변경되므로 KST시간(+9시간)으로 반영
-                        date.setHours(date.getHours() + 9);
-                        return {
-                            device: item,
-                            date: date.toISOString().slice(0, 19)
-                        };
-                    })
-            ))
-
-            // 시간 선택은 요일까지만 반영하기 위함
-            const dateSelectList = new Set(
-                uniqueTimeList.map(item => {
-                    return item.date.slice(0, 10);
-                })
-            );
-
-            // dateSelect 초기화
-            dateSelect.innerHTML = "";
-
-            // 요일 선택 옵션에 추가
-            const defaultOption = document.createElement("option");
-            defaultOption.value = "";
-            defaultOption.textContent = "시간 선택";
-            dateSelect.appendChild(defaultOption);
-
-            dateSelectList.forEach(time => {
-                const option = document.createElement("option");
-                option.value = time;
-                option.textContent = time;
-                dateSelect.appendChild(option);
-            });
-
-        } // end 함수: date setting
-
-        // 함수: 요일 선택
-        function selectDate() {
-            const selectedDate = document.getElementById("dateSelect").value;
-            // 해당 요일의 모든 기록 필터링
-            selectedDataListOnDate = uniqueTimeList.filter(item => item.date.startsWith(selectedDate));
-        }
-
-        // 함수: 지도에 마킹
-        async function viewingLogsOnMap() {
-            showLoading(); // 로딩 창 표시
-
-            // 순서 지정을 위한 변수
-            let i = 1;
-            // 초기 세팅 및 초기화
-            const infoWindow = new google.maps.InfoWindow();
-            const {AdvancedMarkerElement, PinElement} = await google.maps.importLibrary("marker");
-            const markerLabelsBody = document.querySelector("#markerLabels tbody");
-
-            // 기존 마커 제거
-            if (markedList) {
-                markedList.forEach(marker => {
-                    if (marker && marker.map) {
-                        marker.map = null;  // 기존 마커를 지도에서 제거
+            uniqueDataList= getUniqueTimeList();
+            const dateList = uniqueDataList.map(item => item.date);
+            $("#datePicker").datepicker("destroy");
+            $("#datePicker").datepicker({
+                dateformat: "yy-mm-dd",
+                beforeShowDay: function (date){
+                    const formattedDate = $.datepicker.formatDate('yy-mm-dd', date);
+                    if(dateList.includes(formattedDate)){
+                        return[true, "", "선택 가능"];
                     }
-                });
-            }
-            markedList = [];
-            markerLabelsBody.innerHTML = "";
-            // end 초기 세팅 및 초기화
-
-            // 선택된 일자의 기록을 이용해 마커 세팅
-            for (const data of selectedDataListOnDate) {
-                if (!isNaN(parseFloat(data.device.latitude)) && !isNaN(parseFloat(data.device.longitude))) {
-                    const position = {
-                        lat: parseFloat(data.device.latitude),
-                        lng: parseFloat(data.device.longitude)
-                    };
-                    // 마커에 표시항 텍스트 세팅
-                    const pinTextGlyph = new PinElement({
-                        glyph: i.toString(),
-                        glyphColor: "white",
-                    });
-                    // 마커 세팅
-                    const marker = new AdvancedMarkerElement({
-                        position: position,
-                        map: map,
-                        title: i.toString(),
-                        gmpClickable: true,
-                        content: pinTextGlyph.element,
-                    });
-
-                    // 마커에 표시할 infoWindow 세팅
-                    const contentString = `<div><strong>${marker.title}번</strong><br>Latitude: ${position.lat}<br>Longitude: ${position.lng}</div>`;
-                    marker.addListener("click", () => {
-                        openInfoWindow(marker, contentString);
-                    });
-                    markedList.push(marker);
-
-                    // 위치 정보를 await로 가져옴
-                    const info = await getLocationInfo(position.lat, position.lng);
-
-                    // marker list 세팅
-                    const label = document.createElement("tr");
-
-                    const number = document.createElement("td");
-                    number.textContent = i.toString();
-
-                    const latCell = document.createElement("td")
-                    latCell.textContent = position.lat;
-
-                    const lngCell = document.createElement("td");
-                    lngCell.textContent = position.lng
-
-                    const address = document.createElement("td");
-                    address.textContent = info;
-
-                    label.appendChild(number);
-                    label.appendChild(latCell);
-                    label.appendChild(lngCell);
-                    label.appendChild(address);
-
-                    label.addEventListener("click", () => {
-                        openInfoWindow(marker, contentString);
-                    });
-                    markerLabelsBody.appendChild(label);
-                    // end mark list 세팅
-                    i++;
+                    else{
+                        return[false, "ui-state-disabled", "선택 불가"];
+                    }
 
                 }
+            });
+        }
+
+        // uniqueTimeList 생성
+        function getUniqueTimeList() {
+            return originData
+                .filter(item => item.deviceId === deviceId)
+                .map(item => {
+                    const date = adjustDate(item[timeType], item["createDate"]);
+                    return {device: item, time: date.toISOString().slice(0, 19), date: date.toISOString().slice(0,10)};
+                });
+        }
+
+        // 날짜 조정
+        function adjustDate(mainDate, fallbackDate, pickedDate = "2000-01") {
+            let date = new Date(mainDate.startsWith(pickedDate) ? fallbackDate : mainDate);
+            date.setHours(date.getHours() + 9);
+            return date;
+        }
+
+        // 날짜 선택 시 기록 필터링
+        function selectDate() {
+            const pickedDate = document.getElementById("datePicker").value;
+            if(!deviceId){
+                selectedDate = pickedDate;
             }
-            // end 선택된 일자의 기록을 이용해 마커 세팅
+            else{
+                const [month, day, year] = pickedDate.split('/');
+                selectedDate=`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+                document.getElementById("datePicker").value = selectedDate;
+            }
+
+
+        }
+
+        // 지도에 마커 표시
+        async function viewingLogsOnMap() {
+            if(!deviceId || !selectedDate){
+                alert("모든 항목을 입력하세요.");
+                return;
+            }
+            const dataListOnDate = uniqueDataList.filter(item => item.date.startsWith(selectedDate));
+
+            if(dataListOnDate.length ===0){
+                alert("기록이 없습니다.");
+                return;
+            }
+            toggleLoading(true);
+
+            const locationPromises = dataListOnDate.map(async (data, index) => {
+                const position = {lat: parseFloat(data.device.latitude), lng: parseFloat(data.device.longitude)};
+                const info = await getLocationInfo(position.lat, position.lng);
+                return {position, info, index: index + 1};
+            });
+            const locationResults = (await Promise.all(locationPromises)).filter(Boolean);
+            displayMarkersOnMap(locationResults);
+            toggleLoading(false);
+        }
+
+        // 각 위치의 주소정보 가져오기
+        async function getLocationInfo(lat, lng) {
+            return new Promise((resolve, reject) => {
+                const geocoder = new google.maps.Geocoder();
+                const latlng = {lat: parseFloat(lat), lng: parseFloat(lng)};
+                geocoder.geocode({location: latlng}, (results, status) => {
+                    if (status === "OK" && results[0]) {
+                        resolve(results[0].formatted_address);
+                    } else {
+                        console.error("Geocoder failed due to:", status);
+                        reject(status);
+                    }
+                });
+            });
+        }
+
+        // 마커 및 리스트 테이블 표시
+        async function displayMarkersOnMap(locationResults) {
+            const {AdvancedMarkerElement, PinElement} = await google.maps.importLibrary("marker");
+            clear();
+            let rowList =[];
+            tableFragment = document.createDocumentFragment();
+            timeTableBody = document.querySelector("#timeTable tbody");
+
+            locationResults.forEach(({position, info, index}) => {
+                const pin = new PinElement({
+                    glyph: index.toString(),
+                    glyphColor: "white",
+                    background: "#2DB400",
+                    borderColor: "2DB400",
+
+                })
+                const marker = new AdvancedMarkerElement({
+                    position,
+                    map,
+                    title: index.toString(),
+                    gmpClickable: true,
+                    content: pin.element
+                });
+                marker.addListener("click", () => map.setCenter(position));
+                markedList.push(marker);
+                positionList.push(position);
+                const uniqueTimeList = uniqueDataList.filter(item => item.time.startsWith(selectedDate))
+                    .map(item => item.time.replace("T"," "));
+                rowList.push(createTableRow(index, uniqueTimeList[index - 1], info));
+
+            });
+            appendData(rowList);
+            if(locationResults.length>20){
+                timeTableBody.appendChild(tableFragment);
+
+            }
             map.setCenter(markedList[0].position);
             map.setZoom(20);
 
-            // 각 마킹 선으로 잇기
-            const pathCoordinates = markedList.map(marker => marker.position);
-            new google.maps.Polyline({
-                path: pathCoordinates,
-                geodesic: true,
-                strokeColor: "#000000",
-                strokeOpacity: 1.0,
-                strokeWeight: 2,
-                map: map
+            drawPolyline();
+        }
+
+        function initializeTable() {
+            tableFragment = document.createDocumentFragment();
+            timeTableBody = document.querySelector("#timeTable tbody");
+            for (let i = 1; i <= 20; i++) {
+                const row = createTableRow('', '', '');
+                tableFragment.appendChild(row);
+            }
+            timeTableBody.innerHTML = "";
+            timeTableBody.appendChild(tableFragment);
+        }
+
+        // 테이블 행 생성
+        function createTableRow(index, date, address) {
+            const row = document.createElement("tr");
+            ["td", "td", "td"].forEach((tag, i) => {
+                const cell = document.createElement(tag);
+                cell.textContent = i === 0 ? index : i === 1 ? date : address;
+                row.appendChild(cell);
             });
+            return row;
+        }
 
-            hideLoading(); // 로딩 창 숨기기
+        // 데이터를 추가하는 함수
+        function appendData(dataList) {
+            timeTableBody.innerHTML="";
+            dataList.forEach(data =>{
+                tableFragment.appendChild(data);
+            })
 
-            function openInfoWindow(marker, content) {
-                infoWindow.close();
-                infoWindow.setContent(content);
-                infoWindow.open(marker.map, marker);
-                map.setCenter(marker.position);
+            if(dataList.length<20){
+                for(i=0; i< 20 - dataList.length ;i++){
+                    const row = createTableRow('', '', '');
+                    tableFragment.append(row);
+                }
             }
-
-            // 함수ㅣ 각 위치의 주소정보 가져오기
-            async function getLocationInfo(lat, lng) {
-                return new Promise((resolve, reject) => {
-                    const geocoder = new google.maps.Geocoder();
-                    const latlng = {lat: parseFloat(lat), lng: parseFloat(lng)};
-
-                    geocoder.geocode({location: latlng}, (results, status) => {
-                        if (status === "OK") {
-                            if (results[0]) {
-                                console.log("Full Address:", results[0].formatted_address);
-
-                                let country, city;
-                                results[0].address_components.forEach(component => {
-                                    if (component.types.includes("country")) {
-                                        country = component.long_name;
-                                    }
-                                    if (component.types.includes("locality")) {
-                                        city = component.long_name;
-                                    }
-                                });
-                                resolve(results[0].formatted_address);
-                            } else {
-                                console.log("No results found");
-                                resolve(null); // 결과가 없을 때 null 반환
-                            }
-                        } else {
-                            console.error("Geocoder failed due to:", status);
-                            reject(status); // 오류 발생 시 reject
-                        }
-                    });
-                });
-            }
-            // end 함수: 각 위치의 주소정보 가져오기
+            timeTableBody.appendChild(tableFragment);
 
         }
-        // end 함수: 지도에 마킹
+        // 지도 선 연결
+        function drawPolyline() {
+            polyLine = new google.maps.Polyline({
+                path: positionList, geodesic: true, strokeColor: "#8FD3AD",
+                strokeOpacity: 1.0, strokeWeight: 2, map
+            });
+        }
 
-        window.onload = initMap;
+        // 기존 마커와 Polyline 제거
+        function clear() {
+            markedList.forEach(marker => marker.setMap(null));
+            if (polyLine) polyLine.setMap(null);
+            markedList = [];
+            positionList = [];
+
+            if (timeTableBody) initializeTable();
+        }
+        function reset(){
+            clear();
+            const deviceSelect = document.getElementById("deviceSelect");
+            deviceSelect.value="";
+            deviceSelect.dispatchEvent(new Event("change"));
+            deviceId = null;
+
+            // 기본 옵션으로 재설정
+            document.getElementById("datePicker").value = "날짜 선택";
+            selectedDate=null;
+        }
+
+
+
+        window.onload = initializing();
     </script>
 
     <style>
         /* Select 스타일 */
+        body{
+            color: #484848;
+        }
+        #title{
+            text-align: center;
+        }
+        #form-container {
+            display: flex;
+            gap: 20px; /* 각 그룹 간격 설정 */
+            align-items: flex-start; /* 수직 정렬 */
+            margin-bottom: 10px;
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+        .label{
+            padding-bottom: 3px;
+            /*text-align: center;*/
+        }
         select {
             border: 1px solid black;
             border-radius: 4px;
             font-size: 16px;
             padding: 4px 8px;
-            color: black;
             cursor: pointer;
+            color: #484848;
         }
 
+        option{
+            color: #484848;
+        }
+        .selectlabel{
+            width: 125px;
+            height: 25px;
+        }
         /* 버튼 스타일 */
-        button {
-            border: 1px solid black;        /* 테두리 */
-            border-radius: 4px;             /* 둥근 모서리 */
-            font-size: 16px;                /* 글자 크기 */
-            padding: 4px 8px;              /* 여백 추가 */
-            background-color: #4CAF50;      /* 배경색 */
-            color: white;                   /* 글자 색상 */
-            cursor: pointer;                /* 마우스 포인터 변경 */
+        .btn {
+            border: 1px solid black; /* 테두리 */
+            border-radius: 4px; /* 둥근 모서리 */
+            font-size: 16px; /* 글자 크기 */
+            padding: 4px 8px; /* 여백 추가 */
+            background-color: #4CAF50; /* 배경색 */
+            color: white; /* 글자 색상 */
+            cursor: pointer; /* 마우스 포인터 변경 */
             transition: background-color 0.3s ease; /* 색상 전환 효과 */
+            margin-top: auto;
+        }
+
+        #searchBtn{
+            background-color: #4CAF50; /* 배경색 */
+            border-color: #4CAF50;
+        }
+        #resetBtn{
+            background-color: #4CAF50; /* 배경색 */
+            border-color: #4CAF50;
+        }
+        #datePicker{
+            color: #484848;
         }
         #loadingOverlay {
-            display: none; /* 기본적으로 숨김 */
+            /* 기본적으로 숨김 */
             position: fixed;
             top: 0;
             left: 0;
@@ -316,67 +359,73 @@
             justify-content: center;
             z-index: 1000;
         }
+
         /* 테이블 전체에 테두리 */
-        #markerLabels {
+        #timeTable {
             border-collapse: collapse; /* 셀 테두리 결합 */
             width: 100%;
+            table-layout: fixed; /* 셀의 너비 고정 */
         }
+
         /* 셀에 테두리 및 패딩 */
-        #markerLabels th, #markerLabels td {
-            border: 1px solid #000; /* 검정색 테두리 */
+        #timeTable th, #timeTable td {
+            border: 1px solid #a0a0a0 ; /* 검정색 테두리 */
             padding: 8px;
             text-align: center;
+            height: 21px; /* 각 셀의 높이를 직접 설정 */
         }
 
         /* 테이블 헤더 스타일 */
-        #markerLabels th {
+        #timeTable th {
             background-color: #f2f2f2;
+            font-size: 14px;
+            color: #666666;
+        }
+        tr{
+            height: 100%;
+        }
+        th.order{
+            width: 8%;
+        }
+        th.time{
+            width: 25%;
+        }
+        th.address{
+            width: 67%;
         }
     </style>
 </head>
 <body>
 <div id="loadingOverlay">Loading...</div>
+<h2 id="title">Smart Tracker Map Viewer</h2>
+<div id="form-container">
+    <div class="form-group">
+        <label class="label" for="deviceSelect">디바이스</label>
+        <select class="selectlabel"  id="deviceSelect" onchange="deviceSelecting()"  data-live-search="true" >
+            <option value="" disabled selected>디바이스 선택</option>
+        </select>
+    </div>
 
-
-<h3>Smart_Tracker_Map_Viewer</h3>
-
-<div style="margin-bottom: 10px">
-    <!-- Device ID 선택 -->
-    <select id="deviceSelect" onchange="deviceSelecting()">
-        <option value="">디바이스 선택</option>
-    </select>
-
-    <!-- Time Type 선택 -->
-    <select id="timeTypeSelect" onchange="dateSetting()">
-        <option value="">시간 구분</option>
-        <option value="collectDate">UTC</option>
-        <option value="koreanDate">KST</option>
-    </select>
-
-    <!-- 시간 선택 -->
-    <select id="dateSelect" onchange="selectDate()">
-        <option value="">요일 선택</option>
-    </select>
-    <button onclick="viewingLogsOnMap()">검색</button>
+    <div class="form-group">
+        <label class="label" for="datePicker">날짜</label>
+        <input class="selectlabel" type="text" id="datePicker" value="날짜 선택" readonly onchange="selectDate()">
+    </div>
+    <button class="btn btn-search" id="searchBtn" type="button" onclick="viewingLogsOnMap()">검색</button>
+    <button class="btn btn-reset" id="resetBtn" type="button" onclick="reset()">초기화</button>
 </div>
-
-<!-- map -->
 <div style="display: flex; gap: 20px">
     <div id="map" style="width: 60%; height: 800px;"></div>
     <div style="overflow-y: auto; width: 40%; height: 800px">
-        <table id="markerLabels">
+        <table id="timeTable">
             <thead>
-                <tr>
-                    <th>순서</th>
-                    <th>위도</th>
-                    <th>경도</th>
-                    <th>주소</th>
-                </tr>
+            <tr>
+                <th class="order">순서</th>
+                <th class="time">시간(KST)</th>
+                <th class="address">주소</th>
+            </tr>
             </thead>
-            <tbody>
-
-            </tbody>
-        </table> <!-- 위치 목록 -->
+            <tbody></tbody>
+        </table>
     </div>
 </div>
 </body>
