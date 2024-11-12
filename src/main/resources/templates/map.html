@@ -16,7 +16,8 @@
         let markedList = [], positionList = [], timeTableBody, tableFragment;
         const timeType="koreanDate";
 
-
+       /* 초기 로드 함수들
+       */
         // 로딩 표시 함수
         function toggleLoading(show) {
             document.getElementById("loadingOverlay").style.display = show ? "flex" : "none";
@@ -75,6 +76,9 @@
 
         }
 
+        /*
+        end 초기 로드 함수들
+         */
         // 장치 선택
         function deviceSelecting() {
             deviceId = document.getElementById("deviceSelect").value;
@@ -256,7 +260,7 @@
             });
         }
 
-        // 기존 마커와 Polyline 제거
+        // 새 값을 매핑하기 위해 변수 비우기
         function clear() {
             markedList.forEach(marker => marker.setMap(null));
             if (polyLine) polyLine.setMap(null);
@@ -265,6 +269,8 @@
 
             if (timeTableBody) initializeTable();
         }
+
+        // 초기화
         function reset(){
             clear();
             const deviceSelect = document.getElementById("deviceSelect");
